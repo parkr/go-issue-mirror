@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	goissues "github.com/bradfitz/go-issue-mirror/issues"
 	"github.com/bradfitz/issuemirror"
 	"github.com/google/go-github/github"
+	jekyllissues "github.com/parkr/jekyll-issue-mirror/issues"
 	"github.com/shurcooL/issues"
 	"github.com/shurcooL/issuesapp"
 	"github.com/shurcooL/issuesapp/common"
@@ -25,7 +25,7 @@ var httpFlag = flag.String("http", ":8080", "Listen for HTTP connections on this
 func main() {
 	flag.Parse()
 
-	root, err := goissues.Open()
+	root, err := jekyllissues.Open()
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -38,7 +38,7 @@ func main() {
 			return context.TODO()
 		},
 		RepoSpec: func(req *http.Request) issues.RepoSpec {
-			return issues.RepoSpec{URI: "github.com/golang/go"}
+			return issues.RepoSpec{URI: "github.com/jekyll/jekyll"}
 		},
 		BaseURI: func(req *http.Request) string {
 			return "."
