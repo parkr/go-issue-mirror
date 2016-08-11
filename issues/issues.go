@@ -16,7 +16,7 @@ import (
 // Open returns the root of the Go issue mirror cache,
 // looking under $GOPATH/src/github.com/bradfitz/go-issue-mirror.
 func Open() (issuemirror.Root, error) {
-	root, err := goPackagePath("github.com/bradfitz/go-issue-mirror")
+	root, err := goPackagePath("github.com/parkr/jekyll-issue-mirror")
 	if err != nil {
 		return "", err
 	}
