@@ -1,6 +1,8 @@
+// servegoissues is a program that serves Go issues over HTTP, so they can be viewed in a browser.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,9 +17,7 @@ import (
 	jekyllissues "github.com/parkr/jekyll-issue-mirror/issues"
 	"github.com/shurcooL/issues"
 	"github.com/shurcooL/issuesapp"
-	"github.com/shurcooL/issuesapp/common"
 	"github.com/shurcooL/users"
-	"golang.org/x/net/context"
 )
 
 var httpFlag = flag.String("http", ":8080", "Listen for HTTP connections on this address.")
@@ -30,31 +30,9 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	// issuesapp requires an issues.Service and users.Service implementations.
 	// We provide a simple read-only implementation of issues.Service on top of root,
-	// and a no users service since this runs locally and doesn't need user authentication.
-	issuesApp := issuesapp.New(issuesService{root: root}, noUsersService{}, issuesapp.Options{
-		Context: func(req *http.Request) context.Context {
-			return context.TODO()
-		},
-		RepoSpec: func(req *http.Request) issues.RepoSpec {
-			return issues.RepoSpec{URI: "github.com/jekyll/jekyll"}
-		},
-		BaseURI: func(req *http.Request) string {
-			return "."
-		},
-		BaseState: func(req *http.Request) issuesapp.BaseState {
-			reqPath := req.URL.Path
-			if reqPath == "/" {
-				reqPath = ""
-			}
-			return issuesapp.BaseState{
-				State: common.State{
-					BaseURI: ".",
-					ReqPath: reqPath,
-				},
-			}
-		},
+	// and a nil users service since this runs locally and doesn't need user authentication.
+	issuesApp := issuesapp.New(issuesService{root: root}, nil, issuesapp.Options{
 		HeadPre: `<style type="text/css">
 	body {
 		margin: 20px;
@@ -80,9 +58,18 @@ func main() {
 		box-shadow: 0 1px 1px rgba(0, 0, 0, .05);
 	}
 </style>`,
+		BodyPre: `
+{{/* Override new comment component to link to original issue for leaving comments. */}}
+{{define "new-comment"}}<div class="event" style="margin-top: 20px; margin-bottom: 100px;">
+	View <a href="https://github.com/jekyll/jekyll/issues/{{.Issue.ID}}#new_comment_field">original issue</a> to comment.
+</div>{{end}}`,
 	})
 
-	http.Handle("/", issuesApp)
+	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		req = req.WithContext(context.WithValue(req.Context(), issuesapp.RepoSpecContextKey, issues.RepoSpec{URI: "github.com/jekyll/jekyll"}))
+		req = req.WithContext(context.WithValue(req.Context(), issuesapp.BaseURIContextKey, "."))
+		issuesApp.ServeHTTP(w, req)
+	})
 	http.HandleFunc("/login/github", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, "Sorry, this is a read-only instance and it doesn't support signing in.")
@@ -131,8 +118,8 @@ func (s issuesService) List(ctx context.Context, repo issues.RepoSpec, opt issue
 		for _, l := range issue.Labels {
 			color, err := ghColor(l.Color)
 			if err != nil {
-				// issuemirror doesn't seem to provide label colors now, so fall back to white.
-				color = issues.RGB{R: 255, G: 255, B: 255}
+				// issuemirror doesn't seem to provide label colors now, so fall back to a default light gray.
+				color = issues.RGB{R: 0xed, G: 0xed, B: 0xed}
 			}
 			labels = append(labels, issues.Label{
 				Name:  *l.Name,
@@ -212,7 +199,9 @@ func (s issuesService) Get(ctx context.Context, repo issues.RepoSpec, id uint64)
 }
 
 // ListComments lists comments for specified issue id.
-func (s issuesService) ListComments(ctx context.Context, repo issues.RepoSpec, id uint64, opt interface{}) ([]issues.Comment, error) {
+func (s issuesService) ListComments(ctx context.Context, repo issues.RepoSpec, id uint64, opt *issues.ListOptions) ([]issues.Comment, error) {
+	// TODO: Pagination. Respect opt.Start and opt.Length, if given.
+
 	var comments []issues.Comment
 
 	issue, err := s.root.Issue(int(id))
@@ -248,7 +237,7 @@ func (s issuesService) ListComments(ctx context.Context, repo issues.RepoSpec, i
 }
 
 // ListEvents lists events for specified issue id.
-func (issuesService) ListEvents(ctx context.Context, repo issues.RepoSpec, id uint64, opt interface{}) ([]issues.Event, error) {
+func (issuesService) ListEvents(ctx context.Context, repo issues.RepoSpec, id uint64, opt *issues.ListOptions) ([]issues.Event, error) {
 	// For now, no events.
 	// Not sure if issuemirror exposes them. They're pretty optional, so look into this later.
 	return nil, nil
@@ -299,30 +288,4 @@ func ghColor(hex *string) (issues.RGB, error) {
 		return issues.RGB{}, fmt.Errorf("color value %q has unexpected format, error parsing: %v", *hex, err)
 	}
 	return c, nil
-}
-
-// noUsersService implements users.Service without any users.
-// There can never be an authenticated user either.
-type noUsersService struct{}
-
-// Get fetches the specified user.
-func (noUsersService) Get(ctx context.Context, user users.UserSpec) (users.User, error) {
-	return users.User{}, fmt.Errorf("%v not found, this is a users service that contains no users", user)
-}
-
-// GetAuthenticatedSpec fetches the currently authenticated user specification,
-// or UserSpec{ID: 0} if there is no authenticated user.
-func (noUsersService) GetAuthenticatedSpec(ctx context.Context) (users.UserSpec, error) {
-	return users.UserSpec{}, nil
-}
-
-// GetAuthenticated fetches the currently authenticated user,
-// or User{UserSpec: UserSpec{ID: 0}} if there is no authenticated user.
-func (noUsersService) GetAuthenticated(ctx context.Context) (users.User, error) {
-	return users.User{}, nil
-}
-
-// Edit the authenticated user.
-func (noUsersService) Edit(ctx context.Context, er users.EditRequest) (users.User, error) {
-	return users.User{}, errors.New("Edit is not implemented")
 }

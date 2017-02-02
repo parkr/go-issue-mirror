@@ -7,45 +7,28 @@
 package issues
 
 import (
-	"os"
-	"path/filepath"
+	"go/build"
 
 	"github.com/bradfitz/issuemirror"
 )
 
 // Open returns the root of the Go issue mirror cache,
-// looking under $GOPATH/src/github.com/bradfitz/go-issue-mirror.
+// looking under $GOPATH/src/github.com/bradfitz/go-issue-mirror/_data.
 func Open() (issuemirror.Root, error) {
-	root, err := goPackagePath("github.com/parkr/jekyll-issue-mirror")
+	root, err := importPathToDir("github.com/parkr/jekyll-issue-mirror/_data")
 	if err != nil {
 		return "", err
 	}
 	return issuemirror.Root(root), nil
 }
 
-// goPackagePath returns the path to the provided Go package's
-// source directory.
-// pkg may be a path prefix without any *.go files.
-// The error is os.ErrNotExist if GOPATH is unset or the directory
-// doesn't exist in any GOPATH component.
-func goPackagePath(pkg string) (path string, err error) {
-	gp := os.Getenv("GOPATH")
-	if gp == "" {
-		return path, os.ErrNotExist
+// importPathToDir resolves the absolute path from importPath.
+// There doesn't need to be a valid Go package inside that import path,
+// but the directory must exist.
+func importPathToDir(importPath string) (string, error) {
+	p, err := build.Import(importPath, "", build.FindOnly)
+	if err != nil {
+		return "", err
 	}
-	for _, p := range filepath.SplitList(gp) {
-		dir := filepath.Join(p, "src", filepath.FromSlash(pkg))
-		fi, err := os.Stat(dir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		if !fi.IsDir() {
-			continue
-		}
-		return dir, nil
-	}
-	return path, os.ErrNotExist
+	return p.Dir, nil
 }
