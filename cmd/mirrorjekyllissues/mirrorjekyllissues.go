@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradfitz/issuemirror"
@@ -21,15 +23,50 @@ const (
 	repo  = "jekyll"
 )
 
+type debugLogger struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (d *debugLogger) nowPrefix() string {
+	return time.Now().Format("2006/01/02 15:04:05 ")
+}
+
+func (d *debugLogger) Println(args ...interface{}) {
+	d.Printf("%s", fmt.Sprintln(args...))
+}
+
+func (d *debugLogger) Printf(format string, args ...interface{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.messages = append(d.messages, fmt.Sprintf(d.nowPrefix()+format, args...))
+}
+
+func (d *debugLogger) String() string {
+	return strings.Join(d.messages, "\n")
+}
+
+func (d *debugLogger) Fatalf(format string, args ...interface{}) {
+	d.Printf(format, args...)
+	fmt.Fprintln(os.Stderr, d.String())
+	os.Exit(1)
+}
+
+func (d *debugLogger) Fatalln(args ...interface{}) {
+	d.Fatalf("%s", fmt.Sprintln(args...))
+}
+
+var debug = debugLogger{}
+
 func writeIssues(client *github.Client, root issuemirror.Root, issues []*github.Issue) error {
 	g, _ := errgroup.WithContext(context.Background())
-	log.Printf("processing %d issues", len(issues))
+	debug.Printf("processing %d issues", len(issues))
 	for _, issue := range issues {
 		issueVal := *issue
 		num := *issueVal.Number
 		g.Go(func() error {
 			start := time.Now()
-			log.Printf("started processing %d at %v", num, start)
+			debug.Printf("started processing %d at %v", num, start)
 			// Write issue
 			issueFile := root.IssueJSONFile(num)
 			err := os.MkdirAll(filepath.Dir(issueFile), 0755)
@@ -65,21 +102,21 @@ func writeIssues(client *github.Client, root issuemirror.Root, issues []*github.
 				},
 			}
 			for {
-				log.Printf("client.Issues.ListComments(%s, %s, %d, %s)", owner, repo, num, github.Stringify(opt))
+				debug.Printf("client.Issues.ListComments(%s, %s, %d, %s)", owner, repo, num, github.Stringify(opt))
 				comments, resp, err := client.Issues.ListComments(owner, repo, num, opt)
 				if err != nil {
-					log.Fatalf("listing comments for issue=%d; page %d: %v", num, opt.ListOptions.Page, err)
+					debug.Fatalf("listing comments for issue=%d; page %d: %v", num, opt.ListOptions.Page, err)
 				}
 				err = writeComments(root, issueVal, comments)
 				if err != nil {
-					log.Fatalf("writing comments for issue=%d; page %d: %v", num, opt.ListOptions.Page, err)
+					debug.Fatalf("writing comments for issue=%d; page %d: %v", num, opt.ListOptions.Page, err)
 				}
 				if resp.NextPage == 0 {
 					break
 				}
 				opt.ListOptions.Page = resp.NextPage
 			}
-			log.Printf("finished processing %d in %s", num, time.Since(start))
+			debug.Printf("finished processing %d in %s", num, time.Since(start))
 			return nil
 		})
 	}
@@ -88,7 +125,7 @@ func writeIssues(client *github.Client, root issuemirror.Root, issues []*github.
 
 func writeComments(root issuemirror.Root, issue github.Issue, comments []*github.IssueComment) error {
 	g, _ := errgroup.WithContext(context.Background())
-	log.Printf("processing %d comments for issue=%d", len(comments), *issue.Number)
+	debug.Printf("processing %d comments for issue=%d", len(comments), *issue.Number)
 	for _, comment := range comments {
 		commentVal := *comment
 		g.Go(func() error {
@@ -106,7 +143,7 @@ func writeComments(root issuemirror.Root, issue github.Issue, comments []*github
 func main() {
 	root, err := jekyllissues.Open()
 	if err != nil {
-		log.Fatalln("error opening issue cache folder", err)
+		debug.Fatalln("error opening issue cache folder", err)
 	}
 
 	client := github.NewClient(oauth2.NewClient(
@@ -126,17 +163,17 @@ func main() {
 	}
 
 	for {
-		log.Printf("client.Issues.ListByRepo(%s, %s, %s)", owner, repo, github.Stringify(opt))
+		debug.Printf("client.Issues.ListByRepo(%s, %s, %s)", owner, repo, github.Stringify(opt))
 		issues, resp, err := client.Issues.ListByRepo(owner, repo, opt)
 		if err != nil {
-			log.Fatalln("listing issues; page", opt.ListOptions.Page, err)
+			debug.Fatalln("listing issues; page", opt.ListOptions.Page, err)
 		}
 		err = writeIssues(client, root, issues)
 		if err != nil {
-			log.Fatalln("writing issues; page", opt.ListOptions.Page, err)
+			debug.Fatalln("writing issues; page", opt.ListOptions.Page, err)
 		}
 		if resp.NextPage == 0 {
-			log.Println("no more pages")
+			debug.Println("no more pages")
 			break
 		}
 		opt.ListOptions.Page = resp.NextPage
