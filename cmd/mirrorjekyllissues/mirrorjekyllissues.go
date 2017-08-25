@@ -103,7 +103,7 @@ func writeIssues(client *github.Client, root issuemirror.Root, issues []*github.
 			}
 			for {
 				debug.Printf("client.Issues.ListComments(%s, %s, %d, %s)", owner, repo, num, github.Stringify(opt))
-				comments, resp, err := client.Issues.ListComments(owner, repo, num, opt)
+				comments, resp, err := client.Issues.ListComments(context.Background(), owner, repo, num, opt)
 				if err != nil {
 					debug.Fatalf("listing comments for issue=%d; page %d: %v", num, opt.ListOptions.Page, err)
 				}
@@ -164,7 +164,7 @@ func main() {
 
 	for {
 		debug.Printf("client.Issues.ListByRepo(%s, %s, %s)", owner, repo, github.Stringify(opt))
-		issues, resp, err := client.Issues.ListByRepo(owner, repo, opt)
+		issues, resp, err := client.Issues.ListByRepo(context.Background(), owner, repo, opt)
 		if err != nil {
 			debug.Fatalln("listing issues; page", opt.ListOptions.Page, err)
 		}
